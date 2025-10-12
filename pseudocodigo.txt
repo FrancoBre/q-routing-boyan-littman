@@ -1,0 +1,101 @@
+class Node:
+  id: final NodeId
+  neighbors: final List<Node>
+  queue: Queue<Packet>
+  q_table: QTable
+  pending_requests: Packet // this is to ensure packets are actually
+                           // sent at the end of each tick as a barrier
+
+class QTable:
+  q_values: Set<QValue>
+
+class QValue:
+  from: final NodeId
+  to: final NodeId
+  destination: final NodeId
+  value: Float
+
+class Packet:
+  origin: final NodeId
+  destination: final NodeId
+  route: List<Hop>
+  reached_destination: Bool
+  time_in_queue: Int
+
+record Hop:
+  from: NodeId
+  to: NodeId
+  sent: Timestamp
+  received: Timestamp
+
+class Main:
+
+  function main():
+    nodes = create_6x6_grid()
+
+    // start with low network load
+    packet = generate_routing_request(nodes)
+
+    nodes[packet.origin].send(packet)
+
+    while(!packets_are_delivered()):
+      tick()
+
+    average_delivery_time = measure_average_delivery_time(packet)
+    generate_graph(average_delivery_time)
+
+    // increase network load
+    packets = List<Packet>
+    for i = 0..10:
+      packet = generate_routing_request(nodes)
+      packets.add(packet)
+
+    nodes[packets[0].origin].queue.push(packet)
+    packets.remove(0)
+
+    time_until_next_send = 10
+    while(!packets_are_delivered()):
+      tick()
+
+      if (time_until_next_send == 0):
+        nodes[packets[0].origin].queue.push(packets[0].origin)
+        packets.remove(0)
+        time_until_next_send = 10
+      else:
+        time_until_next_send --
+
+    average_delivery_times = measure_average_delivery_times(delivered packets)
+    generate_graph(average_delivery_times)
+
+    // keep increasing network load
+    // increasing the amount of packets sent,
+    // and reducing the time between sending them
+    ...
+
+  function tick():
+
+    for node in nodes:
+      packet = node.queue.pop()
+
+      next_node = min(q_table[node.id, packet.destination])
+
+      next_node_estimation = next_node.q_table[node.id][packet.destination][next_node] 
+
+      old_estimation = node.q_table[node.id][packet.destination][next_node]
+
+      new_estimation = 0.5 [ (packet.time_in_queue + 1 + next_node_estimation) - old_estimation ]
+
+      node.q_table[node.id][packet.destination][next_node] = new_estimation
+
+      for every other packet p in node.queue:
+        p.time_in_queue ++
+
+      packet.time_in_queue = 0
+
+      packet.route.add(new Hop(node.id, next_node.id, time, time + 1))
+      node.pending_request.add(packet) // we delay requests until end of tick as a barrier
+
+    for node in nodes:
+      next_node.queue.push(packet)
+
+    time++
