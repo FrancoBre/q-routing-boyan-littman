@@ -68,9 +68,9 @@ class Node:
         if self.id == packet.destination:
             packet.reached_destination = True
             packet.route.append(hop)
-            from simulation import metrics
+            from metrics import metrics
             metrics.on_delivered(packet)
-            print(f"[receive] Packet delivered to destination {self.id}")
+            print(f"[receive] Packet {packet.id} delivered to destination {self.id}")
         else:
             self.queue.append(packet)
 
@@ -78,20 +78,19 @@ class Node:
         """Plans to send a packet later (executed at the end of the tick)."""
         self.pending_requests.append((packet, next_node))
 
-    def execute_pending_requests(self):
+    def execute_pending_requests(self, current_time: int):
         """Executes all planned sends at the end of the tick."""
         for packet, next_node in self.pending_requests:
-            from simulation import time
             hop = Hop(
                 from_id=self.id,
                 to_id=next_node.id,
-                sent=time,
-                received=time + 1
+                sent=current_time,
+                received=current_time + 1
             )
             packet.time_in_queue = 0
             packet.route.append(hop)
-            print(
-                f'[execute_pending_requests] Time={time} - NodeId={self.id} - Sending packet {packet} to NodeId={next_node.id}')
+            # print(
+            #     f'[execute_pending_requests] Time={current_time} - NodeId={self.id} - Sending packet {packet} to NodeId={next_node.id}')
             next_node.receive(hop, packet)
         # Clear all pending requests after they’ve been processed
         self.pending_requests.clear()

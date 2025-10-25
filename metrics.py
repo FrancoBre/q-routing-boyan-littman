@@ -28,11 +28,10 @@ class Metrics:
         """Register that a packet has been delivered."""
         self.delivered_packets.append(packet)
 
-    def sample_if_needed(self):
+    def sample_if_needed(self, time: int):
         """Sample avg delivery time based on sampling policy."""
         if self._current_label is None:
             return
-        from simulation import time
         if time % self.sample_every == 0:
             avg = self.average_delivery_time_so_far()
             self.series[self._current_label].append((time, avg))
@@ -47,7 +46,7 @@ class Metrics:
 
     def average_delivery_time_so_far(self) -> float:
         """Average over all delivered packets so far (global view)."""
-        delivered_with_route = [p for p in self.delivered_packets if p.route]
+        delivered_with_route = [p for p in self.delivered_packets if p.route] # <- FIXME: o delivered_packets está vacío, o p.route está vacío
         if not delivered_with_route:
             return 0.0
         total = sum(self.delivery_time(p) for p in delivered_with_route)
@@ -76,4 +75,6 @@ class Metrics:
         plt.legend()
         plt.title("Average Delivery Time vs Simulator Time")
         plt.show()
-        plt.savefig("average_delivery_times.png", dpi=300)
+        # plt.savefig("average_delivery_times.png", dpi=300)
+
+metrics = Metrics(sample_every=10)

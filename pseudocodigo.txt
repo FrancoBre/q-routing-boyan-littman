@@ -77,13 +77,21 @@ class Main:
     for node in nodes:
       packet = node.queue.pop()
 
-      next_node = min(q_table[node.id, packet.destination])
+      next_nodes = min(q_table[node.id, packet.destination])
+
+      next_node
+      if next_nodes.size == 1:
+        next_node = next_nodes[0]
+      else:
+        next_node = random(next_nodes)
 
       next_node_estimation = next_node.q_table[node.id][packet.destination][next_node] 
 
       old_estimation = node.q_table[node.id][packet.destination][next_node]
 
-      new_estimation = 0.5 [ (packet.time_in_queue + 1 + next_node_estimation) - old_estimation ]
+      delta = 0.5 [ (packet.time_in_queue + 1 + next_node_estimation) - old_estimation ]
+
+      new_estimation = old_estimation + delta
 
       node.q_table[node.id][packet.destination][next_node] = new_estimation
 
