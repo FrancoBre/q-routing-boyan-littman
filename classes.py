@@ -16,20 +16,29 @@ class Hop:
 
 @dataclass
 class QTable:
-    q_values: Dict[Tuple[NodeId, NodeId, NodeId], float] = field(default_factory=dict)
+    """Q-table simplificada: (destination, neighbor) -> estimated_time
+    El from_id está implícito (es el nodo que contiene esta Q-table)"""
+    q_values: Dict[Tuple[NodeId, NodeId], float] = field(default_factory=dict)
 
-    def get(self, from_id: NodeId, destination: NodeId, to_id: NodeId) -> float:
-        return self.q_values.get((from_id, destination, to_id), 0.0)
+    def get(self, destination: NodeId, neighbor: NodeId) -> float:
+        """Obtiene Q-value para ir al destino vía el vecino"""
+        return self.q_values.get((destination, neighbor), 0.0)
 
-    def set(self, from_id: NodeId, destination: NodeId, to_id: NodeId, value: float):
-        self.q_values[(from_id, destination, to_id)] = value
+    def set(self, destination: NodeId, neighbor: NodeId, value: float):
+        """Establece Q-value para ir al destino vía el vecino"""
+        self.q_values[(destination, neighbor)] = value
+
+    def get_min_for_destination(self, destination: NodeId) -> float:
+        """Obtiene el mínimo Q-value para un destino dado (t en la fórmula)"""
+        relevant = [v for (d, n), v in self.q_values.items() if d == destination]
+        return min(relevant) if relevant else 0.0
 
     def __str__(self):
         if not self.q_values:
             return "QTable: (empty)"
-        lines = [" QTable:", " from_id | destination | to_id | value", "-" * 36]
-        for (from_id, destination, to_id), value in sorted(self.q_values.items()):
-            lines.append(f" {from_id:7} | {destination:11} | {to_id:5} | {value:6.2f}")
+        lines = [" QTable:", " destination | neighbor | value", "-" * 36]
+        for (destination, neighbor), value in sorted(self.q_values.items()):
+            lines.append(f" {destination:11} | {neighbor:8} | {value:6.2f}")
         return "\n".join(lines)
 
 
@@ -39,7 +48,10 @@ class Packet:
     destination: NodeId
     route: List[Hop] = field(default_factory=list)
     reached_destination: bool = False
-    time_in_queue: int = 0
+    time_in_queue: int = 0  # deprecated, usar queue_entry_time y departure_time
+    queue_entry_time: int = 0  # tick cuando entró a la cola del nodo actual
+    departure_time: int = 0  # tick cuando salió del nodo anterior
+    arrival_time: int = 0  # tick cuando llegó al nodo actual
     id: int = field(init=False)
 
     _id_counter: int = 0  # class variable for auto-increment
@@ -51,7 +63,6 @@ class Packet:
     def __str__(self):
         return (f"Packet(id={self.id}, origin={self.origin}, destination={self.destination}, "
                 f"reached_destination={self.reached_destination}, "
-                f"time_in_queue={self.time_in_queue}, "
                 f"route_length={len(self.route)})")
 
 
@@ -62,9 +73,47 @@ class Node:
         self.queue: deque[Packet] = deque()
         self.q_table = QTable()
         self.pending_requests: List[Tuple[Packet, 'Node']] = []  # used for delayed sends
+        self.learning_rate: float = 0.5  # η en la fórmula del paper
 
-    def receive(self, hop: Hop, packet: Packet):
-        """Receives a packet; delivers if it's the destination, otherwise queues it."""
+    def initialize_q_table(self, all_nodes: List['Node']):
+        """Inicializa Q-table con valores optimistas para todos los destinos y vecinos"""
+        for dest_node in all_nodes:
+            if dest_node.id != self.id:  # No inicializar para sí mismo
+                for neighbor in self.neighbors:
+                    # Inicialización optimista con valor bajo
+                    self.q_table.set(dest_node.id, neighbor.id, 1.0)
+
+    def receive(self, hop: Hop, packet: Packet, current_time: int, previous_node: 'Node' = None):
+        """Receives a packet; delivers if it's the destination, otherwise queues it.
+        
+        IMPORTANTE: Aquí es donde se actualiza la Q-table según el paper.
+        """
+        packet.arrival_time = current_time
+        
+        # Si hay un nodo anterior, actualizar su Q-table con la experiencia real
+        if previous_node is not None and packet.route:
+            # Calcular q: tiempo que estuvo en cola en el nodo anterior
+            q = packet.departure_time - packet.queue_entry_time
+            
+            # Calcular s: tiempo de transmisión entre nodos
+            s = packet.arrival_time - packet.departure_time
+            
+            # Calcular t: mejor estimación de este nodo para llegar al destino
+            t = self.q_table.get_min_for_destination(packet.destination)
+            
+            # Actualizar Q-table del nodo anterior usando la fórmula del paper
+            # ΔQx(d,y) = η[(q + s + t) - Qx(d,y)]
+            old_estimate = previous_node.q_table.get(packet.destination, self.id)
+            new_experience = q + s + t
+            delta = previous_node.learning_rate * (new_experience - old_estimate)
+            new_value = old_estimate + delta
+            
+            previous_node.q_table.set(packet.destination, self.id, new_value)
+            
+            print(f"[Q-update] Time={current_time} Node {previous_node.id}->{self.id} for dest={packet.destination}: "
+                  f"q={q}, s={s}, t={t:.2f}, old={old_estimate:.2f}, new={new_value:.2f}")
+        
+        # Procesar el paquete
         if self.id == packet.destination:
             packet.reached_destination = True
             packet.route.append(hop)
@@ -72,6 +121,8 @@ class Node:
             metrics.on_delivered(packet)
             print(f"[receive] Packet {packet.id} delivered to destination {self.id}")
         else:
+            # Registrar que entró a la cola de este nodo
+            packet.queue_entry_time = current_time
             self.queue.append(packet)
 
     def plan_send(self, packet: Packet, next_node: 'Node'):
@@ -87,12 +138,14 @@ class Node:
                 sent=current_time,
                 received=current_time + 1
             )
-            packet.time_in_queue = 0
+            # Registrar el momento de salida para cálculos futuros
+            packet.departure_time = current_time
             packet.route.append(hop)
-            # print(
-            #     f'[execute_pending_requests] Time={current_time} - NodeId={self.id} - Sending packet {packet} to NodeId={next_node.id}')
-            next_node.receive(hop, packet)
-        # Clear all pending requests after they’ve been processed
+            
+            # Enviar al siguiente nodo, pasando referencia al nodo actual
+            next_node.receive(hop, packet, current_time + 1, previous_node=self)
+        
+        # Clear all pending requests after they've been processed
         self.pending_requests.clear()
 
     def __repr__(self):

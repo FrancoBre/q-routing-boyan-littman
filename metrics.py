@@ -60,21 +60,44 @@ class Metrics:
     def all_series(self) -> Dict[str, List[Tuple[int, float]]]:
         return self.series
 
-    def plot(self):
+    def plot(self, filename: str = "average_delivery_times.png"):
         """
-        matplotlib plot of all series.
+        matplotlib plot of all series. Saves to file without displaying.
         """
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend
         import matplotlib.pyplot as plt
+        
+        if not self.series:
+            print("[metrics] No data to plot")
+            return
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
         for label, points in self.series.items():
             if not points:
                 continue
             xs, ys = zip(*points)
-            plt.plot(xs, ys, label=label)
-        plt.xlabel("Simulator Time")
-        plt.ylabel("Average Delivery Time")
-        plt.legend()
-        plt.title("Average Delivery Time vs Simulator Time")
-        plt.show()
-        # plt.savefig("average_delivery_times.png", dpi=300)
+            
+            # Use markers for better visibility when there are few points
+            if len(points) == 1:
+                # Single point: show as a large marker with annotation
+                ax.plot(xs, ys, marker='o', markersize=12, label=label, linewidth=0)
+                ax.annotate(f'{ys[0]:.2f}', xy=(xs[0], ys[0]), 
+                           xytext=(10, 10), textcoords='offset points',
+                           fontsize=10, bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.7))
+            else:
+                # Multiple points: show line without markers
+                ax.plot(xs, ys, label=label, linewidth=2)
+        
+        ax.set_xlabel("Simulator Time (ticks)", fontsize=12)
+        ax.set_ylabel("Average Delivery Time (ticks)", fontsize=12)
+        ax.legend(fontsize=10)
+        ax.set_title("Average Delivery Time vs Simulator Time", fontsize=14, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"[metrics] Plot saved to {filename}")
+        plt.close()
 
 metrics = Metrics(sample_every=10)
